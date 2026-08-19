@@ -20,8 +20,7 @@ void encode_vector(const std::vector<float>& values, vectordb::v1::DenseVector* 
 
 VDB_TEST(grpc_service_streams_upserts_and_serves_search) {
   const auto directory = std::filesystem::temp_directory_path() / "vectordb-grpc-test";
-  std::filesystem::create_directories(directory);
-  std::filesystem::remove(directory / "grpc-items.wal");
+  std::filesystem::remove_all(directory);
   auto shard = std::make_shared<vectordb::shard::ShardService>(directory);
   shard->create_collection({.name = "grpc-items", .dimensions = 2, .metric = vectordb::Metric::L2Squared,
                             .hnsw = {.max_neighbors = 8, .ef_construction = 64}});
@@ -65,5 +64,5 @@ VDB_TEST(grpc_service_streams_upserts_and_serves_search) {
     VDB_REQUIRE(response.hits(0).id() == 99U);
   }
   server->Shutdown();
-  std::filesystem::remove(directory / "grpc-items.wal");
+  std::filesystem::remove_all(directory);
 }

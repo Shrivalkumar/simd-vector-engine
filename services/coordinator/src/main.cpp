@@ -49,6 +49,7 @@ int main(int argc, char** argv) {
     builder.AddListeningPort(argv[1], grpc::InsecureServerCredentials());
     builder.RegisterService(static_cast<vectordb::v1::VectorData::Service*>(&service));
     builder.RegisterService(static_cast<vectordb::v1::ClusterInternal::Service*>(&service));
+    builder.RegisterService(static_cast<vectordb::v1::CollectionAdmin::Service*>(&service));
     auto server = builder.BuildAndStart();
     if (!server) throw std::runtime_error("failed to start gRPC coordinator");
     std::cout << "vectordb coordinator serving " << logical_shards << " logical shards on " << argv[1] << '\n';
