@@ -14,17 +14,17 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "VectorDB Control Plane",
-  description: "Live topology and search telemetry for VectorDB.",
+  description: "Local operational administration, ingestion, search, and load testing for VectorDB.",
   applicationName: "VectorDB",
   openGraph: {
     title: "VectorDB Control Plane",
-    description: "Distributed vector search, instrumented in real time.",
+    description: "Operate, search, and stress-test a local distributed vector database.",
     images: ["/og.png"],
   },
   twitter: {
     card: "summary_large_image",
     title: "VectorDB Control Plane",
-    description: "Distributed vector search, instrumented in real time.",
+    description: "Operate, search, and stress-test a local distributed vector database.",
     images: ["/og.png"],
   },
   icons: {
