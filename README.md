@@ -12,11 +12,12 @@ the storage and API boundaries needed for sharding, replication, and telemetry.
 cmake --preset macos-arm64-debug
 cmake --build --preset macos-arm64-debug
 ctest --preset macos-arm64-debug
-./build/macos-arm64-debug/vectordb-cli demo
+./build/macos-arm64-debug-make/vectordb-cli demo
 ```
 
 The core currently provides persistent collection records, L2/dot/cosine
 distance kernels with ARM NEON acceleration, HNSW search, typed payloads,
-tombstone deletion, and crash-safe WAL recovery. Service, consensus, and UI
-layers are added in later milestones.
-
+generation-checked deletion, and crash-safe WAL recovery. It also includes
+gRPC shard/coordinator services and a build-verified telemetry UI. See
+`docs/architecture/current-state.md` for the deliberately explicit HA and
+filtering boundaries.

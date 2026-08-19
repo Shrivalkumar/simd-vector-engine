@@ -3,10 +3,10 @@
 The repository contains a runnable vertical slice rather than a simulated
 directory tree.
 
-- `vectordb_core` provides cache-aligned storage, ARM NEON L2/dot/cosine
-  kernels, a durable checksummed WAL, records with generation control, and an
-  HNSW index. Updates use tombstoned HNSW nodes so readers never observe an
-  index rebuild.
+- `vectordb_core` provides a 128-byte-aligned buffer primitive, ARM NEON
+  L2/dot/cosine kernels, a durable checksummed WAL, records with generation
+  control, and an HNSW index. Updates use inactive HNSW nodes so readers never
+  observe an index rebuild.
 - `vectordb_shard` exposes idempotent batches to the service layer. The gRPC
   shard daemon compiles from the checked-in proto contract and validates raw
   FP32 wire vectors before storage.
@@ -34,4 +34,3 @@ they do not yet have:
 
 These boundaries are intentional: they keep the public response semantics
 honest while the remaining persistence and replication milestones are built.
-
