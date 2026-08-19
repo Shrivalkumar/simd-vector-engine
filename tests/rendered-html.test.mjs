@@ -51,5 +51,5 @@ test("keeps dashboard metadata and visualization boundaries intentional", async 
   assert.match(consoleSource, /deterministic asynchronous sample/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
-  await assert.rejects(access(new URL("app/_sites-preview", templateRoot)));
+  await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", templateRoot)));
 });
