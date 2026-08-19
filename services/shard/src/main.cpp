@@ -16,12 +16,16 @@ int main(int argc, char** argv) {
   try {
     const auto dimensions = static_cast<std::uint32_t>(std::stoul(argv[4]));
     auto shard = std::make_shared<vectordb::shard::ShardService>(std::filesystem::path(argv[1]));
-    shard->create_collection({.name = argv[3], .dimensions = dimensions, .metric = vectordb::Metric::Cosine,
-                              .hnsw = {.max_neighbors = 32, .ef_construction = 200}});
+    if (shard->list_collections().empty()) {
+      shard->create_collection({.name = argv[3], .dimensions = dimensions, .metric = vectordb::Metric::Cosine,
+                                .hnsw = {.max_neighbors = 32, .ef_construction = 200}});
+    }
     vectordb::shard::ShardGrpcService service(shard);
+    vectordb::shard::ShardAdminGrpcService admin_service(shard);
     grpc::ServerBuilder builder;
     builder.AddListeningPort(argv[2], grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
+    builder.RegisterService(&admin_service);
     auto server = builder.BuildAndStart();
     if (!server) throw std::runtime_error("failed to start gRPC server");
     std::cout << "vectordb shard serving collection " << argv[3] << " on " << argv[2] << '\n';

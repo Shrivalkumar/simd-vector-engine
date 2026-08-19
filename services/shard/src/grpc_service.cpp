@@ -40,7 +40,12 @@ PayloadValue decode_value(const vectordb::v1::PayloadValue& value) {
 
 Record decode_record(const vectordb::v1::Record& record, bool with_vector) {
   if (record.id() == 0U || record.generation() == 0U) throw std::invalid_argument("record id and generation must be non-zero");
-  Record result{.id = record.id(), .generation = record.generation()};
+  Record result{
+      .id = record.id(),
+      .generation = record.generation(),
+      .vector = {},
+      .payload = {},
+  };
   if (with_vector) result.vector = decode_vector(record.vector());
   result.payload.reserve(static_cast<std::size_t>(record.payload_size()));
   for (const auto& field : record.payload()) {
@@ -77,6 +82,41 @@ void encode_record(const Record& source, vectordb::v1::Record* destination) {
 
 grpc::Status invalid_argument(const std::exception& error) {
   return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
+}
+
+grpc::Status service_error(const std::exception& error) {
+  if (dynamic_cast<const std::out_of_range*>(&error) != nullptr) {
+    return {grpc::StatusCode::NOT_FOUND, error.what()};
+  }
+  return invalid_argument(error);
+}
+
+Metric decode_metric(vectordb::v1::DistanceMetric metric) {
+  switch (metric) {
+    case vectordb::v1::DISTANCE_METRIC_COSINE: return Metric::Cosine;
+    case vectordb::v1::DISTANCE_METRIC_L2_SQUARED: return Metric::L2Squared;
+    case vectordb::v1::DISTANCE_METRIC_DOT_PRODUCT: return Metric::DotProduct;
+    case vectordb::v1::DISTANCE_METRIC_UNSPECIFIED: return Metric::Cosine;
+    default: break;
+  }
+  throw std::invalid_argument("unsupported distance metric");
+}
+
+vectordb::v1::DistanceMetric encode_metric(Metric metric) {
+  switch (metric) {
+    case Metric::Cosine: return vectordb::v1::DISTANCE_METRIC_COSINE;
+    case Metric::L2Squared: return vectordb::v1::DISTANCE_METRIC_L2_SQUARED;
+    case Metric::DotProduct: return vectordb::v1::DISTANCE_METRIC_DOT_PRODUCT;
+  }
+  return vectordb::v1::DISTANCE_METRIC_UNSPECIFIED;
+}
+
+void encode_collection(const CollectionSummary& source, vectordb::v1::CollectionInfo* destination) {
+  destination->set_name(source.config.name);
+  destination->set_dimensions(source.config.dimensions);
+  destination->set_metric(encode_metric(source.config.metric));
+  destination->set_live_vectors(source.live_vectors);
+  destination->set_resident_bytes(source.resident_bytes);
 }
 
 bool has_filter(const vectordb::v1::Filter& filter) {
@@ -127,6 +167,13 @@ grpc::Status ShardGrpcService::VectorSearch(grpc::ServerContext* context,
       output->set_id(hit.id);
       output->set_generation(hit.generation);
       output->set_distance(hit.score);
+      if (const auto record = shard_->get(request->collection(), hit.id); record.has_value()) {
+        for (const auto& field : record->payload) {
+          auto* payload = output->add_payload();
+          payload->set_key(field.key);
+          encode_value(field.value, payload->mutable_value());
+        }
+      }
     }
     return grpc::Status::OK;
   } catch (const std::exception& error) {
@@ -158,6 +205,68 @@ grpc::Status ShardGrpcService::DeleteRecords(grpc::ServerContext* context,
     return grpc::Status::OK;
   } catch (const std::exception& error) {
     return invalid_argument(error);
+  }
+}
+
+ShardAdminGrpcService::ShardAdminGrpcService(std::shared_ptr<ShardService> shard) : shard_(std::move(shard)) {
+  if (!shard_) throw std::invalid_argument("ShardAdminGrpcService requires a shard");
+}
+
+grpc::Status ShardAdminGrpcService::CreateCollection(grpc::ServerContext* context,
+                                                     const vectordb::v1::CreateCollectionRequest* request,
+                                                     vectordb::v1::CreateCollectionResponse* response) {
+  if (context->IsCancelled()) return {grpc::StatusCode::CANCELLED, "client cancelled request"};
+  try {
+    shard_->create_collection({.name = request->name(),
+                               .dimensions = request->dimensions(),
+                               .metric = decode_metric(request->metric()),
+                               .hnsw = {.max_neighbors = request->hnsw_m() == 0U ? 32U : request->hnsw_m(),
+                                        .ef_construction = request->ef_construction() == 0U
+                                                               ? 200U
+                                                               : request->ef_construction()}});
+    encode_collection(shard_->describe_collection(request->name()), response->mutable_collection());
+    return grpc::Status::OK;
+  } catch (const std::exception& error) {
+    return service_error(error);
+  }
+}
+
+grpc::Status ShardAdminGrpcService::ListCollections(grpc::ServerContext* context,
+                                                    const vectordb::v1::ListCollectionsRequest* request,
+                                                    vectordb::v1::ListCollectionsResponse* response) {
+  (void)request;
+  if (context->IsCancelled()) return {grpc::StatusCode::CANCELLED, "client cancelled request"};
+  try {
+    for (const auto& collection : shard_->list_collections()) {
+      encode_collection(collection, response->add_collections());
+    }
+    return grpc::Status::OK;
+  } catch (const std::exception& error) {
+    return service_error(error);
+  }
+}
+
+grpc::Status ShardAdminGrpcService::DescribeCollection(grpc::ServerContext* context,
+                                                       const vectordb::v1::DescribeCollectionRequest* request,
+                                                       vectordb::v1::DescribeCollectionResponse* response) {
+  if (context->IsCancelled()) return {grpc::StatusCode::CANCELLED, "client cancelled request"};
+  try {
+    encode_collection(shard_->describe_collection(request->name()), response->mutable_collection());
+    return grpc::Status::OK;
+  } catch (const std::exception& error) {
+    return service_error(error);
+  }
+}
+
+grpc::Status ShardAdminGrpcService::DeleteCollection(grpc::ServerContext* context,
+                                                     const vectordb::v1::DeleteCollectionRequest* request,
+                                                     vectordb::v1::DeleteCollectionResponse* response) {
+  if (context->IsCancelled()) return {grpc::StatusCode::CANCELLED, "client cancelled request"};
+  try {
+    response->set_deleted(shard_->delete_collection(request->name()));
+    return grpc::Status::OK;
+  } catch (const std::exception& error) {
+    return service_error(error);
   }
 }
 

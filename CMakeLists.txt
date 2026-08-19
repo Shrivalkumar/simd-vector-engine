@@ -5,7 +5,15 @@ project(vectordb VERSION 0.1.0 LANGUAGES CXX)
 option(VDB_BUILD_TESTS "Build VectorDB tests" ON)
 option(VDB_BUILD_TOOLS "Build VectorDB tools" ON)
 option(VDB_ENABLE_SANITIZERS "Enable platform-appropriate runtime sanitizers" OFF)
+option(VDB_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(VDB_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(VDB_BUILD_GRPC "Build gRPC network services when gRPC is available" ON)
+
+if((VDB_ENABLE_SANITIZERS AND VDB_ENABLE_ASAN) OR
+   (VDB_ENABLE_SANITIZERS AND VDB_ENABLE_TSAN) OR
+   (VDB_ENABLE_ASAN AND VDB_ENABLE_TSAN))
+  message(FATAL_ERROR "Select only one VectorDB sanitizer mode")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -63,10 +71,18 @@ vdb_enable_sanitizers(vectordb_coordinator)
 
 find_program(VDB_PROTOC_EXECUTABLE protoc)
 set(VDB_PROTO_FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/proto/vectordb/v1/admin.proto
   ${CMAKE_CURRENT_SOURCE_DIR}/proto/vectordb/v1/records.proto
   ${CMAKE_CURRENT_SOURCE_DIR}/proto/vectordb/v1/search.proto
   ${CMAKE_CURRENT_SOURCE_DIR}/proto/vectordb/v1/cluster.proto
   ${CMAKE_CURRENT_SOURCE_DIR}/proto/vectordb/v1/telemetry.proto
+)
+set(VDB_PROTO_RELATIVE_FILES
+  vectordb/v1/admin.proto
+  vectordb/v1/records.proto
+  vectordb/v1/search.proto
+  vectordb/v1/cluster.proto
+  vectordb/v1/telemetry.proto
 )
 if(VDB_PROTOC_EXECUTABLE)
   add_custom_command(
@@ -87,28 +103,36 @@ if(VDB_BUILD_GRPC)
   find_package(gRPC CONFIG QUIET)
   if(Protobuf_FOUND AND gRPC_FOUND)
     set(VDB_GRPC_AVAILABLE TRUE)
-    add_library(vectordb_proto STATIC)
-    protobuf_generate(
-      TARGET vectordb_proto
-      LANGUAGE cpp
-      PROTOC_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated
-      IMPORT_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/proto
-      PROTOS ${VDB_PROTO_FILES}
-    )
-    protobuf_generate(
-      TARGET vectordb_proto
-      LANGUAGE grpc
-      GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
-      PLUGIN protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
-      PROTOC_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated
-      IMPORT_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/proto
-      PROTOS ${VDB_PROTO_FILES}
-    )
-    target_include_directories(vectordb_proto PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
+    set(VDB_PROTO_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+    set(VDB_PROTO_GENERATED_SOURCES)
+    foreach(VDB_PROTO_RELATIVE_FILE IN LISTS VDB_PROTO_RELATIVE_FILES)
+      string(REGEX REPLACE "\\.proto$" "" VDB_PROTO_STEM ${VDB_PROTO_RELATIVE_FILE})
+      set(VDB_PROTO_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/proto/${VDB_PROTO_RELATIVE_FILE})
+      set(VDB_PROTO_CPP ${VDB_PROTO_GENERATED_DIR}/${VDB_PROTO_STEM}.pb.cc)
+      set(VDB_PROTO_HEADER ${VDB_PROTO_GENERATED_DIR}/${VDB_PROTO_STEM}.pb.h)
+      set(VDB_GRPC_CPP ${VDB_PROTO_GENERATED_DIR}/${VDB_PROTO_STEM}.grpc.pb.cc)
+      set(VDB_GRPC_HEADER ${VDB_PROTO_GENERATED_DIR}/${VDB_PROTO_STEM}.grpc.pb.h)
+      add_custom_command(
+        OUTPUT ${VDB_PROTO_CPP} ${VDB_PROTO_HEADER} ${VDB_GRPC_CPP} ${VDB_GRPC_HEADER}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${VDB_PROTO_GENERATED_DIR}/vectordb/v1
+        COMMAND $<TARGET_FILE:protobuf::protoc>
+          --proto_path=${CMAKE_CURRENT_SOURCE_DIR}/proto
+          --cpp_out=${VDB_PROTO_GENERATED_DIR}
+          --grpc_out=${VDB_PROTO_GENERATED_DIR}
+          --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
+          ${VDB_PROTO_RELATIVE_FILE}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/proto
+        DEPENDS ${VDB_PROTO_SOURCE} protobuf::protoc gRPC::grpc_cpp_plugin
+        VERBATIM
+      )
+      list(APPEND VDB_PROTO_GENERATED_SOURCES ${VDB_PROTO_CPP} ${VDB_GRPC_CPP})
+    endforeach()
+    add_library(vectordb_proto STATIC ${VDB_PROTO_GENERATED_SOURCES})
+    target_include_directories(vectordb_proto PUBLIC ${VDB_PROTO_GENERATED_DIR})
     target_link_libraries(vectordb_proto PUBLIC protobuf::libprotobuf gRPC::grpc++)
     # Protobuf emits source files controlled by the installed protoc version. They are
     # treated as third-party generated code; -Werror remains enabled on every hand-written target.
-    if(NOT MSVC)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       target_compile_options(vectordb_proto PRIVATE -Wno-nullability-extension)
     endif()
 
