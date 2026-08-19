@@ -23,14 +23,30 @@ void Segment::recover() {
 }
 
 void Segment::upsert(Record record) {
-  if (record.id == 0U || record.generation == 0U) throw std::invalid_argument("id and generation must be non-zero");
-  if (record.vector.size() != dimensions_) throw std::invalid_argument("record dimension mismatch");
-  std::unique_lock lock(mutex_);
-  if (const auto found = records_.find(record.id); found != records_.end() && found->second.generation >= record.generation) {
-    throw std::invalid_argument("record generation is stale");
+  upsert_batch(std::span<const Record>(&record, 1U));
+}
+
+void Segment::upsert_batch(std::span<const Record> records) {
+  if (records.empty()) return;
+  for (const auto& record : records) {
+    if (record.id == 0U || record.generation == 0U) throw std::invalid_argument("id and generation must be non-zero");
+    if (record.vector.size() != dimensions_) throw std::invalid_argument("record dimension mismatch");
   }
-  (void)wal_.append_upsert(record);
-  apply_upsert(record);
+  std::unique_lock lock(mutex_);
+  std::unordered_map<VectorId, Generation> staged_generations;
+  staged_generations.reserve(records.size());
+  for (const auto& record : records) {
+    Generation current_generation = 0U;
+    if (const auto staged = staged_generations.find(record.id); staged != staged_generations.end()) {
+      current_generation = staged->second;
+    } else if (const auto found = records_.find(record.id); found != records_.end()) {
+      current_generation = found->second.generation;
+    }
+    if (current_generation >= record.generation) throw std::invalid_argument("record generation is stale");
+    staged_generations.insert_or_assign(record.id, record.generation);
+  }
+  (void)wal_.append_upserts(records);
+  for (const auto& record : records) apply_upsert(record);
 }
 
 void Segment::erase(VectorId id, Generation expected_generation) {
@@ -74,4 +90,3 @@ void Segment::apply_delete(VectorId id, Generation generation) {
 }
 
 }  // namespace vectordb
-

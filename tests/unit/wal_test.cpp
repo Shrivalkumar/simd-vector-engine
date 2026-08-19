@@ -27,3 +27,22 @@ VDB_TEST(wal_recovers_durable_entries_and_ignores_torn_tail) {
   std::filesystem::remove(path);
 }
 
+VDB_TEST(wal_group_commit_preserves_every_record_and_lsn) {
+  const auto path = test::temp_path("wal-group-commit");
+  std::filesystem::remove(path);
+  vectordb::WriteAheadLog wal(path);
+  const std::vector<vectordb::Record> records{
+      {.id = 1, .generation = 1, .vector = {1.0F, 0.0F}, .payload = {}},
+      {.id = 2, .generation = 1, .vector = {0.0F, 1.0F}, .payload = {}},
+      {.id = 3, .generation = 1, .vector = {0.5F, 0.5F}, .payload = {}},
+  };
+  VDB_REQUIRE(wal.append_upserts(records) == 3U);
+  VDB_REQUIRE(wal.append_upsert({.id = 4, .generation = 1, .vector = {0.25F, 0.75F}, .payload = {}}) == 4U);
+  const auto recovered = wal.recover();
+  VDB_REQUIRE(recovered.size() == 4U);
+  for (std::size_t index = 0; index < recovered.size(); ++index) {
+    VDB_REQUIRE(recovered[index].lsn == index + 1U);
+    VDB_REQUIRE(recovered[index].record.id == index + 1U);
+  }
+  std::filesystem::remove(path);
+}
