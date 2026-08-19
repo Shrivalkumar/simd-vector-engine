@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <optional>
 #include <shared_mutex>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -17,6 +18,7 @@ class Segment {
 
   void recover();
   void upsert(Record record);
+  void upsert_batch(std::span<const Record> records);
   void erase(VectorId id, Generation expected_generation);
   [[nodiscard]] std::optional<Record> get(VectorId id) const;
   [[nodiscard]] std::vector<Record> live_records() const;
@@ -34,4 +36,3 @@ class Segment {
 };
 
 }  // namespace vectordb
-

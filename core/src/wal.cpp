@@ -209,32 +209,58 @@ WriteAheadLog::WriteAheadLog(std::filesystem::path path) : path_(std::move(path)
 
 std::uint64_t WriteAheadLog::append_upsert(const Record& record) { return append(WalOperation::Upsert, record); }
 
+std::uint64_t WriteAheadLog::append_upserts(std::span<const Record> records) {
+  if (records.empty()) throw std::invalid_argument("WAL batch cannot be empty");
+  std::vector<std::pair<WalOperation, const Record*>> frames;
+  frames.reserve(records.size());
+  for (const auto& record : records) frames.emplace_back(WalOperation::Upsert, &record);
+  return append_frames(frames);
+}
+
 std::uint64_t WriteAheadLog::append_delete(VectorId id, Generation generation) {
-  return append(WalOperation::Delete, Record{.id = id, .generation = generation});
+  return append(WalOperation::Delete, Record{.id = id, .generation = generation, .vector = {}, .payload = {}});
 }
 
 std::uint64_t WriteAheadLog::append(WalOperation operation, const Record& record) {
+  const std::array<std::pair<WalOperation, const Record*>, 1> frame{{{operation, &record}}};
+  return append_frames(frame);
+}
+
+std::uint64_t WriteAheadLog::append_frames(std::span<const std::pair<WalOperation, const Record*>> records) {
+  if (records.empty()) throw std::invalid_argument("WAL batch cannot be empty");
   std::scoped_lock lock(mutex_);
-  const std::uint64_t lsn = next_lsn_;
-  const auto payload = encode_entry(lsn, operation, record);
-  if (payload.size() > kMaxFrameBytes) throw std::length_error("WAL frame exceeds configured maximum");
-  const std::array<std::uint32_t, 3> header{
-      kMagic, static_cast<std::uint32_t>(payload.size()), crc32(payload)};
   const int fd = ::open(path_.c_str(), O_CREAT | O_WRONLY | O_APPEND, 0640);
   if (fd < 0) throw std::system_error(errno, std::generic_category(), "opening WAL failed");
+  const auto original_size = ::lseek(fd, 0, SEEK_END);
+  if (original_size < 0) {
+    const int saved_errno = errno;
+    (void)::close(fd);
+    throw std::system_error(saved_errno, std::generic_category(), "seeking WAL failed");
+  }
   try {
-    write_all(fd, header.data(), kHeaderBytes);
-    write_all(fd, payload.data(), payload.size());
+    std::uint64_t lsn = next_lsn_;
+    for (const auto& [operation, record] : records) {
+      if (record == nullptr) throw std::invalid_argument("WAL record cannot be null");
+      const auto payload = encode_entry(lsn, operation, *record);
+      if (payload.size() > kMaxFrameBytes) throw std::length_error("WAL frame exceeds configured maximum");
+      const std::array<std::uint32_t, 3> header{
+          kMagic, static_cast<std::uint32_t>(payload.size()), crc32(payload)};
+      write_all(fd, header.data(), kHeaderBytes);
+      write_all(fd, payload.data(), payload.size());
+      ++lsn;
+    }
     if (::fsync(fd) != 0) throw std::system_error(errno, std::generic_category(), "WAL fsync failed");
     if (::close(fd) != 0) throw std::system_error(errno, std::generic_category(), "closing WAL failed");
   } catch (...) {
     const int saved_errno = errno;
+    const int truncate_result = ::ftruncate(fd, original_size);
+    (void)truncate_result;
     (void)::close(fd);
     errno = saved_errno;
     throw;
   }
-  ++next_lsn_;
-  return lsn;
+  next_lsn_ += records.size();
+  return next_lsn_ - 1U;
 }
 
 std::vector<WalEntry> WriteAheadLog::recover() const {

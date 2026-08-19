@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <mutex>
 #include <queue>
 #include <stdexcept>
 #include <unordered_set>
@@ -52,18 +53,69 @@ void HnswIndex::upsert(VectorId id, Generation generation, std::span<const float
   insert_locked(id, generation, vector);
 }
 
+void HnswIndex::upsert_batch(std::span<const Record> records) {
+  if (records.empty()) return;
+  for (const auto& record : records) {
+    if (record.id == 0U || record.generation == 0U) throw std::invalid_argument("invalid HNSW record");
+    (void)validate_vector(record.vector);
+  }
+  std::unique_lock lock(mutex_);
+  if (quantizer_.has_value()) throw std::logic_error("cannot insert into a sealed SQ8 HNSW index");
+  std::unordered_map<VectorId, Generation> staged_generations;
+  staged_generations.reserve(records.size());
+  for (const auto& record : records) {
+    Generation current_generation = 0U;
+    if (const auto staged = staged_generations.find(record.id); staged != staged_generations.end()) {
+      current_generation = staged->second;
+    } else if (const auto found = node_by_id_.find(record.id); found != node_by_id_.end()) {
+      current_generation = nodes_[found->second].generation;
+    }
+    if (current_generation >= record.generation) throw std::invalid_argument("HNSW generation is stale");
+    staged_generations.insert_or_assign(record.id, record.generation);
+  }
+  for (const auto& record : records) {
+    if (const auto found = node_by_id_.find(record.id); found != node_by_id_.end()) {
+      nodes_[found->second].active = false;
+      node_by_id_.erase(found);
+    }
+    insert_locked(record.id, record.generation, record.vector);
+  }
+}
+
+double HnswIndex::validate_vector(std::span<const float> vector) const {
+  if (vector.size() != config_.dimensions) throw std::invalid_argument("invalid HNSW record");
+  double squared_norm = 0.0;
+  for (const float value : vector) {
+    if (!std::isfinite(value)) throw std::invalid_argument("HNSW vector contains a non-finite value");
+    const auto wide_value = static_cast<double>(value);
+    squared_norm = std::fma(wide_value, wide_value, squared_norm);
+  }
+  if (config_.metric == Metric::Cosine && squared_norm <= 0.0) {
+    throw std::invalid_argument("cosine distance is undefined for a zero vector");
+  }
+  return squared_norm;
+}
+
 void HnswIndex::insert_locked(VectorId id, Generation generation, std::span<const float> vector) {
   if (id == 0U || generation == 0U || vector.size() != config_.dimensions) {
     throw std::invalid_argument("invalid HNSW record");
   }
   if (node_by_id_.contains(id)) throw std::invalid_argument("HNSW does not allow duplicate IDs");
   if (quantizer_.has_value()) throw std::logic_error("cannot insert into a sealed SQ8 HNSW index");
+  const double squared_norm = validate_vector(vector);
+
+  std::vector<float> stored_vector(vector.begin(), vector.end());
+  if (config_.metric == Metric::Cosine) {
+    const double inverse_norm = 1.0 / std::sqrt(squared_norm);
+    for (auto& value : stored_vector) value = static_cast<float>(static_cast<double>(value) * inverse_norm);
+  }
 
   const std::uint32_t level = random_level();
   const std::uint32_t node_id = static_cast<std::uint32_t>(nodes_.size());
   nodes_.push_back(Node{.id = id,
                         .generation = generation,
-                        .vector = std::vector<float>(vector.begin(), vector.end()),
+                        .vector = std::move(stored_vector),
+                        .sq8_code = {},
                         .neighbors = std::vector<std::vector<std::uint32_t>>(level + 1U)});
   node_by_id_.emplace(id, node_id);
 
@@ -74,18 +126,20 @@ void HnswIndex::insert_locked(VectorId id, Generation generation, std::span<cons
     return;
   }
 
+  const auto& routing_vector = nodes_[node_id].vector;
+
   std::uint32_t current = entry_point_;
   for (std::uint32_t layer = max_level_; layer > level; --layer) {
-    const auto nearest = search_layer(vector, {current}, layer, 1U);
+    const auto nearest = search_layer(routing_vector, {current}, layer, 1U);
     if (!nearest.empty()) current = nearest.front();
   }
 
   const std::uint32_t top_layer = std::min(level, max_level_);
   for (std::int64_t signed_layer = static_cast<std::int64_t>(top_layer); signed_layer >= 0; --signed_layer) {
     const auto layer = static_cast<std::uint32_t>(signed_layer);
-    const auto nearest = search_layer(vector, {current}, layer, config_.ef_construction);
-    const std::size_t count = std::min<std::size_t>(config_.max_neighbors, nearest.size());
-    for (std::size_t index = 0; index < count; ++index) link(node_id, nearest[index], layer);
+    const auto nearest = search_layer(routing_vector, {current}, layer, config_.ef_construction);
+    const auto selected = select_neighbors(routing_vector, nearest, config_.max_neighbors);
+    for (const auto neighbor : selected) link(node_id, neighbor, layer);
     if (!nearest.empty()) current = nearest.front();
   }
 
@@ -117,20 +171,29 @@ void HnswIndex::enable_sq8() {
 
 std::vector<SearchHit> HnswIndex::search(std::span<const float> query, std::uint32_t k, std::uint32_t ef_search) const {
   if (query.size() != config_.dimensions || k == 0U) throw std::invalid_argument("invalid HNSW query");
+  const double squared_norm = validate_vector(query);
+  std::vector<float> normalized_query;
+  std::span<const float> routing_query = query;
+  if (config_.metric == Metric::Cosine) {
+    normalized_query.assign(query.begin(), query.end());
+    const double inverse_norm = 1.0 / std::sqrt(squared_norm);
+    for (auto& value : normalized_query) value = static_cast<float>(static_cast<double>(value) * inverse_norm);
+    routing_query = normalized_query;
+  }
   std::shared_lock lock(mutex_);
   if (!has_entry_point_) return {};
   std::uint32_t current = entry_point_;
   for (std::uint32_t layer = max_level_; layer > 0U; --layer) {
-    const auto nearest = search_layer(query, {current}, layer, 1U);
+    const auto nearest = search_layer(routing_query, {current}, layer, 1U);
     if (!nearest.empty()) current = nearest.front();
   }
-  const auto nearest = search_layer(query, {current}, 0U, std::max(k, ef_search));
-  const std::size_t rerank_count = std::min<std::size_t>(nearest.size(), std::max<std::uint32_t>(k, 100U));
+  const auto nearest = search_layer(routing_query, {current}, 0U, std::max(k, ef_search));
+  const std::size_t rerank_count = nearest.size();
   std::vector<Candidate> reranked;
   reranked.reserve(rerank_count);
   for (std::size_t index = 0; index < rerank_count; ++index) {
     if (!nodes_[nearest[index]].active) continue;
-    reranked.push_back({.distance = distance(query, nodes_[nearest[index]].vector, config_.metric), .node = nearest[index]});
+    reranked.push_back({.distance = exact_distance(routing_query, nodes_[nearest[index]].vector), .node = nearest[index]});
   }
   std::sort(reranked.begin(), reranked.end(), [](const Candidate& left, const Candidate& right) {
     return left.distance < right.distance;
@@ -170,7 +233,12 @@ std::uint32_t HnswIndex::random_level() {
 float HnswIndex::node_distance(std::span<const float> query, std::uint32_t node_id) const {
   const auto& node = nodes_.at(node_id);
   if (quantizer_.has_value()) return quantizer_->approximate_distance(query, node.sq8_code, config_.metric);
-  return distance(query, node.vector, config_.metric);
+  return exact_distance(query, node.vector);
+}
+
+float HnswIndex::exact_distance(std::span<const float> lhs, std::span<const float> rhs) const {
+  if (config_.metric == Metric::Cosine) return 1.0F - dot_product(lhs, rhs);
+  return distance(lhs, rhs, config_.metric);
 }
 
 std::vector<std::uint32_t> HnswIndex::search_layer(std::span<const float> query,
@@ -214,6 +282,48 @@ std::vector<std::uint32_t> HnswIndex::search_layer(std::span<const float> query,
   return result;
 }
 
+std::vector<std::uint32_t> HnswIndex::select_neighbors(std::span<const float> query,
+                                                       std::span<const std::uint32_t> candidates,
+                                                       std::uint32_t maximum) const {
+  std::vector<Candidate> ordered;
+  ordered.reserve(candidates.size());
+  for (const auto node : candidates) {
+    if (node >= nodes_.size() || !nodes_[node].active) continue;
+    ordered.push_back({.distance = exact_distance(query, nodes_[node].vector), .node = node});
+  }
+  std::sort(ordered.begin(), ordered.end(), [](const Candidate& left, const Candidate& right) {
+    return left.distance == right.distance ? left.node < right.node : left.distance < right.distance;
+  });
+
+  std::vector<std::uint32_t> selected;
+  std::vector<std::uint32_t> rejected;
+  selected.reserve(std::min<std::size_t>(maximum, ordered.size()));
+  rejected.reserve(ordered.size());
+  for (const auto& candidate : ordered) {
+    bool diverse = true;
+    for (const auto chosen : selected) {
+      if (exact_distance(nodes_[candidate.node].vector, nodes_[chosen].vector) < candidate.distance) {
+        diverse = false;
+        break;
+      }
+    }
+    if (diverse && selected.size() < maximum) selected.push_back(candidate.node);
+    else rejected.push_back(candidate.node);
+  }
+  for (const auto candidate : rejected) {
+    if (selected.size() >= maximum) break;
+    selected.push_back(candidate);
+  }
+  return selected;
+}
+
+std::uint32_t HnswIndex::maximum_neighbors(std::uint32_t layer) const noexcept {
+  if (layer != 0U || config_.max_neighbors > std::numeric_limits<std::uint32_t>::max() / 2U) {
+    return config_.max_neighbors;
+  }
+  return config_.max_neighbors * 2U;
+}
+
 void HnswIndex::link(std::uint32_t source, std::uint32_t target, std::uint32_t layer) {
   auto& source_edges = nodes_[source].neighbors[layer];
   auto& target_edges = nodes_[target].neighbors[layer];
@@ -225,12 +335,10 @@ void HnswIndex::link(std::uint32_t source, std::uint32_t target, std::uint32_t l
 
 void HnswIndex::prune_neighbors(std::uint32_t node_id, std::uint32_t layer) {
   auto& edges = nodes_[node_id].neighbors[layer];
-  if (edges.size() <= config_.max_neighbors) return;
+  const auto maximum = maximum_neighbors(layer);
+  if (edges.size() <= maximum) return;
   const auto& origin = nodes_[node_id].vector;
-  std::sort(edges.begin(), edges.end(), [&origin, this](std::uint32_t left, std::uint32_t right) {
-    return distance(origin, nodes_[left].vector, config_.metric) < distance(origin, nodes_[right].vector, config_.metric);
-  });
-  edges.resize(config_.max_neighbors);
+  edges = select_neighbors(origin, edges, maximum);
 }
 
 }  // namespace vectordb

@@ -27,6 +27,7 @@ class HnswIndex {
 
   void insert(VectorId id, Generation generation, std::span<const float> vector);
   void upsert(VectorId id, Generation generation, std::span<const float> vector);
+  void upsert_batch(std::span<const Record> records);
   void deactivate(VectorId id);
   void enable_sq8();
   [[nodiscard]] std::vector<SearchHit> search(std::span<const float> query, std::uint32_t k,
@@ -46,11 +47,17 @@ class HnswIndex {
   };
 
   [[nodiscard]] std::uint32_t random_level();
+  [[nodiscard]] double validate_vector(std::span<const float> vector) const;
   void insert_locked(VectorId id, Generation generation, std::span<const float> vector);
+  [[nodiscard]] float exact_distance(std::span<const float> lhs, std::span<const float> rhs) const;
   [[nodiscard]] float node_distance(std::span<const float> query, std::uint32_t node_id) const;
   [[nodiscard]] std::vector<std::uint32_t> search_layer(std::span<const float> query,
                                                          std::vector<std::uint32_t> entry_points,
                                                          std::uint32_t layer, std::uint32_t ef) const;
+  [[nodiscard]] std::vector<std::uint32_t> select_neighbors(std::span<const float> query,
+                                                             std::span<const std::uint32_t> candidates,
+                                                             std::uint32_t maximum) const;
+  [[nodiscard]] std::uint32_t maximum_neighbors(std::uint32_t layer) const noexcept;
   void link(std::uint32_t source, std::uint32_t target, std::uint32_t layer);
   void prune_neighbors(std::uint32_t node_id, std::uint32_t layer);
 

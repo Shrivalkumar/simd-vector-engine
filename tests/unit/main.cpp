@@ -6,6 +6,8 @@
 #include "test.hpp"
 
 int main() {
+  std::cout << std::unitbuf;
+  std::cerr << std::unitbuf;
   std::size_t failures = 0;
   const bool skip_network = std::getenv("VDB_TEST_SKIP_NETWORK") != nullptr;
   const char* only_test = std::getenv("VDB_TEST_ONLY");
