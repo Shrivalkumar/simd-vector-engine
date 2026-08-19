@@ -4,6 +4,8 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <span>
+#include <utility>
 #include <vector>
 
 #include "vectordb/common/types.hpp"
@@ -25,12 +27,14 @@ class WriteAheadLog {
   WriteAheadLog& operator=(const WriteAheadLog&) = delete;
 
   [[nodiscard]] std::uint64_t append_upsert(const Record& record);
+  [[nodiscard]] std::uint64_t append_upserts(std::span<const Record> records);
   [[nodiscard]] std::uint64_t append_delete(VectorId id, Generation generation);
   [[nodiscard]] std::vector<WalEntry> recover() const;
   [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
 
  private:
   std::uint64_t append(WalOperation operation, const Record& record);
+  std::uint64_t append_frames(std::span<const std::pair<WalOperation, const Record*>> records);
 
   std::filesystem::path path_;
   mutable std::mutex mutex_;
@@ -38,4 +42,3 @@ class WriteAheadLog {
 };
 
 }  // namespace vectordb
-

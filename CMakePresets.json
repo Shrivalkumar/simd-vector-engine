@@ -27,7 +27,31 @@
       "name": "macos-arm64-ubsan",
       "inherits": "base",
       "architecture": { "value": "arm64", "strategy": "external" },
-      "cacheVariables": { "VDB_ENABLE_SANITIZERS": "ON" }
+      "cacheVariables": {
+        "VDB_ENABLE_SANITIZERS": "ON",
+        "VDB_ENABLE_ASAN": "OFF",
+        "VDB_ENABLE_TSAN": "OFF"
+      }
+    },
+    {
+      "name": "macos-arm64-asan",
+      "inherits": "base",
+      "architecture": { "value": "arm64", "strategy": "external" },
+      "cacheVariables": {
+        "VDB_ENABLE_SANITIZERS": "OFF",
+        "VDB_ENABLE_ASAN": "ON",
+        "VDB_ENABLE_TSAN": "OFF"
+      }
+    },
+    {
+      "name": "macos-arm64-tsan",
+      "inherits": "base",
+      "architecture": { "value": "arm64", "strategy": "external" },
+      "cacheVariables": {
+        "VDB_ENABLE_SANITIZERS": "OFF",
+        "VDB_ENABLE_ASAN": "OFF",
+        "VDB_ENABLE_TSAN": "ON"
+      }
     },
     {
       "name": "linux-release",
@@ -39,6 +63,8 @@
     { "name": "macos-arm64-debug", "configurePreset": "macos-arm64-debug" },
     { "name": "macos-arm64-release", "configurePreset": "macos-arm64-release" },
     { "name": "macos-arm64-ubsan", "configurePreset": "macos-arm64-ubsan" },
+    { "name": "macos-arm64-asan", "configurePreset": "macos-arm64-asan" },
+    { "name": "macos-arm64-tsan", "configurePreset": "macos-arm64-tsan" },
     { "name": "linux-release", "configurePreset": "linux-release" }
   ],
   "testPresets": [
@@ -50,6 +76,16 @@
     {
       "name": "macos-arm64-ubsan",
       "configurePreset": "macos-arm64-ubsan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "macos-arm64-asan",
+      "configurePreset": "macos-arm64-asan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "macos-arm64-tsan",
+      "configurePreset": "macos-arm64-tsan",
       "output": { "outputOnFailure": true }
     }
   ]
