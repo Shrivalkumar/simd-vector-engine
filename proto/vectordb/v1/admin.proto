@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package vectordb.v1;
+
+enum DistanceMetric {
+  DISTANCE_METRIC_UNSPECIFIED = 0;
+  DISTANCE_METRIC_COSINE = 1;
+  DISTANCE_METRIC_L2_SQUARED = 2;
+  DISTANCE_METRIC_DOT_PRODUCT = 3;
+}
+
+message CollectionInfo {
+  string name = 1;
+  uint32 dimensions = 2;
+  DistanceMetric metric = 3;
+  uint64 live_vectors = 4;
+  uint64 resident_bytes = 5;
+}
+
+message CreateCollectionRequest {
+  string name = 1;
+  uint32 dimensions = 2;
+  DistanceMetric metric = 3;
+  uint32 hnsw_m = 4;
+  uint32 ef_construction = 5;
+}
+
+message CreateCollectionResponse {
+  CollectionInfo collection = 1;
+}
+
+message ListCollectionsRequest {}
+
+message ListCollectionsResponse {
+  repeated CollectionInfo collections = 1;
+}
+
+message DescribeCollectionRequest {
+  string name = 1;
+}
+
+message DescribeCollectionResponse {
+  CollectionInfo collection = 1;
+}
+
+message DeleteCollectionRequest {
+  string name = 1;
+}
+
+message DeleteCollectionResponse {
+  bool deleted = 1;
+}
+
+service CollectionAdmin {
+  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
+  rpc ListCollections(ListCollectionsRequest) returns (ListCollectionsResponse);
+  rpc DescribeCollection(DescribeCollectionRequest) returns (DescribeCollectionResponse);
+  rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse);
+}
