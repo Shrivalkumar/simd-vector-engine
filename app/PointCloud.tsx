@@ -8,7 +8,7 @@ function seeded(index: number) {
   return value - Math.floor(value);
 }
 
-export function PointCloud({ activeCluster }: { activeCluster: number }) {
+export function PointCloud({ activeCluster, pointCount = 2400 }: { activeCluster: number; pointCount?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -22,7 +22,7 @@ export function PointCloud({ activeCluster }: { activeCluster: number }) {
     const root = new THREE.Group();
     scene.add(root);
     const geometry = new THREE.BufferGeometry();
-    const count = 2400;
+    const count = Math.min(2400, Math.max(240, pointCount));
     const positions = new Float32Array(count * 3);
     const colors = new Float32Array(count * 3);
     const cyan = new THREE.Color("#4bd7ff");
@@ -94,7 +94,7 @@ export function PointCloud({ activeCluster }: { activeCluster: number }) {
       rings.forEach((ring) => { ring.geometry.dispose(); (ring.material as THREE.Material).dispose(); });
       renderer.dispose();
     };
-  }, [activeCluster]);
+  }, [activeCluster, pointCount]);
 
   return <canvas ref={ref} aria-label="Three-dimensional sampled vector projection" />;
 }
