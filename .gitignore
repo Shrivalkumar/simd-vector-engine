@@ -9,3 +9,5 @@ node_modules/
 *.wal
 *.snapshot
 coverage/
+/guide.md
+.local-data/
