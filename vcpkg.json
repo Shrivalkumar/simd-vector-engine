@@ -1,0 +1,13 @@
+{
+  "name": "vectordb",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "grpc",
+    "protobuf",
+    "openssl",
+    "zstd",
+    "crc32c",
+    "benchmark",
+    "catch2"
+  ]
+}

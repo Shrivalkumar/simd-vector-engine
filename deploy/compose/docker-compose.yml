@@ -1,0 +1,44 @@
+services:
+  node-a:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    command: ["vectordb-shardd", "/var/lib/vectordb", "0.0.0.0:7000", "documents", "768"]
+    volumes: ["node-a-data:/var/lib/vectordb"]
+    networks: ["vectordb"]
+
+  node-b:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    command: ["vectordb-shardd", "/var/lib/vectordb", "0.0.0.0:7000", "documents", "768"]
+    volumes: ["node-b-data:/var/lib/vectordb"]
+    networks: ["vectordb"]
+
+  node-c:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    command: ["vectordb-shardd", "/var/lib/vectordb", "0.0.0.0:7000", "documents", "768"]
+    volumes: ["node-c-data:/var/lib/vectordb"]
+    networks: ["vectordb"]
+
+  coordinator:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    command:
+      ["vectordb-coordinatord", "0.0.0.0:7100", "3", "node-a=node-a:7000,node-b=node-b:7000,node-c=node-c:7000"]
+    depends_on: [node-a, node-b, node-c]
+    ports: ["7100:7100"]
+    networks: ["vectordb"]
+
+networks:
+  vectordb:
+    driver: bridge
+
+volumes:
+  node-a-data:
+  node-b-data:
+  node-c-data:
+

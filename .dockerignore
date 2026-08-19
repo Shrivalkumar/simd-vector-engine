@@ -1,0 +1,9 @@
+.git
+.next
+.wrangler
+build
+node_modules
+dist
+coverage
+*.wal
+*.snapshot

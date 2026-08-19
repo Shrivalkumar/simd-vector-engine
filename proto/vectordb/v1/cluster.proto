@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package vectordb.v1;
+
+import "vectordb/v1/search.proto";
+
+enum ShardRole {
+  SHARD_ROLE_UNSPECIFIED = 0;
+  SHARD_ROLE_LEADER = 1;
+  SHARD_ROLE_FOLLOWER = 2;
+  SHARD_ROLE_LEARNER = 3;
+}
+
+message ScatterGatherQueryRequest {
+  uint64 directory_epoch = 1;
+  uint64 logical_shard = 2;
+  VectorSearchRequest query = 3;
+}
+
+message ScatterGatherQueryResponse {
+  uint64 directory_epoch = 1;
+  uint64 logical_shard = 2;
+  repeated SearchHit hits = 3;
+  uint64 applied_index = 4;
+  uint64 elapsed_micros = 5;
+}
+
+message ShardStatus {
+  uint64 logical_shard = 1;
+  ShardRole role = 2;
+  uint64 applied_index = 3;
+  uint64 committed_index = 4;
+  uint64 live_vectors = 5;
+  uint64 resident_bytes = 6;
+}
+
+message NodeHeartbeatRequest {
+  string node_id = 1;
+  uint64 incarnation = 2;
+  uint64 directory_epoch = 3;
+  uint64 unix_millis = 4;
+  uint64 available_memory_bytes = 5;
+  uint64 available_disk_bytes = 6;
+  repeated ShardStatus shards = 7;
+}
+
+message CoordinatorCommand {
+  uint64 directory_epoch = 1;
+  string command_id = 2;
+  oneof command {
+    string drain_node = 3;
+    uint64 refresh_shard = 4;
+    bool reload_certificates = 5;
+  }
+}
+
+service ClusterInternal {
+  rpc ScatterGatherQuery(ScatterGatherQueryRequest) returns (ScatterGatherQueryResponse);
+  rpc NodeHeartbeat(stream NodeHeartbeatRequest) returns (stream CoordinatorCommand);
+}

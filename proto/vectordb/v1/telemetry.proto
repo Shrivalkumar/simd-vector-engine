@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package vectordb.v1;
+
+message VectorCoordinate {
+  uint64 id = 1;
+  float x = 2;
+  float y = 3;
+  float z = 4;
+  uint64 generation = 5;
+  uint64 logical_shard = 6;
+}
+
+message LatencyQuantiles {
+  double p50_millis = 1;
+  double p95_millis = 2;
+  double p99_millis = 3;
+}
+
+message TelemetrySnapshot {
+  uint64 directory_epoch = 1;
+  uint64 projection_epoch = 2;
+  repeated VectorCoordinate vectors = 3;
+  repeated LatencyQuantiles latency = 4;
+}
+
+message TelemetryRequest {
+  uint64 after_directory_epoch = 1;
+  uint64 after_projection_epoch = 2;
+}
+
+service Telemetry {
+  rpc WatchTelemetry(TelemetryRequest) returns (stream TelemetrySnapshot);
+}
+

@@ -1,0 +1,11 @@
+build/
+out/
+.DS_Store
+.wrangler/
+.vinext/
+dist/
+.next/
+node_modules/
+*.wal
+*.snapshot
+coverage/

@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package vectordb.v1;
+
+import "vectordb/v1/records.proto";
+
+enum Consistency {
+  CONSISTENCY_UNSPECIFIED = 0;
+  CONSISTENCY_EVENTUAL = 1;
+  CONSISTENCY_QUORUM = 2;
+  CONSISTENCY_SESSION = 3;
+}
+
+message SessionToken {
+  uint64 shard_id = 1;
+  uint64 committed_index = 2;
+  uint64 directory_epoch = 3;
+}
+
+message BatchUpsertRequest {
+  string collection = 1;
+  bytes idempotency_key = 2;
+  uint64 sequence = 3;
+  repeated Record records = 4;
+  Consistency consistency = 5;
+}
+
+message RecordError {
+  uint64 id = 1;
+  uint32 code = 2;
+  string message = 3;
+}
+
+message BatchUpsertAck {
+  uint64 sequence = 1;
+  uint64 committed_index = 2;
+  uint32 applied_count = 3;
+  repeated RecordError errors = 4;
+  SessionToken session = 5;
+}
+
+message VectorSearchRequest {
+  string collection = 1;
+  DenseVector vector = 2;
+  uint32 top_k = 3;
+  uint32 ef_search = 4;
+  uint32 rerank_candidates = 5;
+  Filter filter = 6;
+  Consistency consistency = 7;
+  SessionToken session = 8;
+  uint64 timeout_millis = 9;
+}
+
+message SearchHit {
+  uint64 id = 1;
+  uint64 generation = 2;
+  float distance = 3;
+  repeated PayloadField payload = 4;
+}
+
+message VectorSearchResponse {
+  repeated SearchHit hits = 1;
+  uint64 shard_index = 2;
+  uint64 elapsed_micros = 3;
+  SessionToken session = 4;
+}
+
+message GetRecordsRequest {
+  string collection = 1;
+  repeated uint64 ids = 2;
+  Consistency consistency = 3;
+  SessionToken session = 4;
+}
+
+message GetRecordsResponse {
+  repeated Record records = 1;
+  SessionToken session = 2;
+}
+
+message DeleteRecordsRequest {
+  string collection = 1;
+  bytes idempotency_key = 2;
+  repeated Record records = 3;
+  Consistency consistency = 4;
+}
+
+message DeleteRecordsResponse {
+  uint64 committed_index = 1;
+  uint32 deleted_count = 2;
+  repeated RecordError errors = 3;
+  SessionToken session = 4;
+}
+
+service VectorData {
+  rpc BatchUpsert(stream BatchUpsertRequest) returns (stream BatchUpsertAck);
+  rpc VectorSearch(VectorSearchRequest) returns (VectorSearchResponse);
+  rpc GetRecords(GetRecordsRequest) returns (GetRecordsResponse);
+  rpc DeleteRecords(DeleteRecordsRequest) returns (DeleteRecordsResponse);
+}
+

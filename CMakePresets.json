@@ -1,0 +1,56 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}-make",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VDB_BUILD_TESTS": "ON",
+        "VDB_BUILD_TOOLS": "ON"
+      }
+    },
+    {
+      "name": "macos-arm64-debug",
+      "inherits": "base",
+      "architecture": { "value": "arm64", "strategy": "external" }
+    },
+    {
+      "name": "macos-arm64-release",
+      "inherits": "base",
+      "architecture": { "value": "arm64", "strategy": "external" },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "macos-arm64-ubsan",
+      "inherits": "base",
+      "architecture": { "value": "arm64", "strategy": "external" },
+      "cacheVariables": { "VDB_ENABLE_SANITIZERS": "ON" }
+    },
+    {
+      "name": "linux-release",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "macos-arm64-debug", "configurePreset": "macos-arm64-debug" },
+    { "name": "macos-arm64-release", "configurePreset": "macos-arm64-release" },
+    { "name": "macos-arm64-ubsan", "configurePreset": "macos-arm64-ubsan" },
+    { "name": "linux-release", "configurePreset": "linux-release" }
+  ],
+  "testPresets": [
+    {
+      "name": "macos-arm64-debug",
+      "configurePreset": "macos-arm64-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "macos-arm64-ubsan",
+      "configurePreset": "macos-arm64-ubsan",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
